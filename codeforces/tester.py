@@ -4,36 +4,43 @@ from rich.console import Console
 from rich.table import Table
 from rich import box
 from rich.text import Text
+from rich.prompt import Prompt
 
 
-def run_and_capture(script_path):
+def run_and_capture(script_path, input_lines):
     try:
-        # Run the script and capture stdout
+        # Run the script with provided input
         result = subprocess.run(
             [sys.executable, script_path],
+            input="\n".join(input_lines) + "\n",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
-        # Split output into lines
-        output_lines = result.stdout.splitlines()
-        return output_lines
+
+        if result.stderr:
+            return result.stdout.splitlines(), result.stderr.strip()
+        return result.stdout.splitlines(), None
     except Exception as e:
-        print(f"Error: {e}")
-        return []
+        return [], str(e)
 
 
-def read_input_lines():
-    input_lines = []
+def read_lines(prompt_title):
+    console = Console()
+    console.print(f"\n[bold cyan]> {prompt_title} (end with empty line):[/]\n")
+    lines = []
     while True:
-        line = sys.stdin.readline()
-        if not line or line.strip() == "":
+        try:
+            line = input()
+        except EOFError:
             break
-        input_lines.append(line.strip())
-    return input_lines
+        if not line.strip():
+            break
+        lines.append(line.strip())
+    return lines
 
 
-def compare_outputs(res, expected):
+def compare_outputs(res, expected, err=None):
     console = Console()
     table = Table(
         title="[bold underline green]Test Case Comparison[/]",
@@ -45,58 +52,53 @@ def compare_outputs(res, expected):
     )
 
     table.add_column("Index", justify="center", style="bold yellow", width=8)
-    table.add_column(
-        "Your Output", style="cyan", overflow="fold", justify="left", no_wrap=False
-    )
-    table.add_column(
-        "Expected Output", style="green", overflow="fold", justify="left", no_wrap=False
-    )
+    table.add_column("Your Output", style="cyan", overflow="fold", justify="left")
+    table.add_column("Expected Output", style="green", overflow="fold", justify="left")
     table.add_column("Status", justify="center", width=10)
 
     max_len = max(len(res), len(expected))
 
+    passed = failed = 0
     for i in range(max_len):
         r = res[i] if i < len(res) else "[dim]<missing>[/dim]"
         e = expected[i] if i < len(expected) else "[dim]<missing>[/dim]"
 
         if r == e:
             status = Text("✅ PASS", style="bold green")
+            passed += 1
         else:
             status = Text("❌ FAIL", style="bold red")
+            failed += 1
 
-        table.add_row(str(i), str(r), str(e), status)
+        table.add_row(str(i), r, e, status)
 
     console.print("\n")
     console.print(table)
+
     console.print(
-        "\n[bold cyan]Summary:[/] [green]✓ {} passed[/], [red]✗ {} failed[/]\n".format(
-            sum(
-                1
-                for i in range(max_len)
-                if i < len(res) and i < len(expected) and res[i] == expected[i]
-            ),
-            sum(
-                1
-                for i in range(max_len)
-                if i >= len(res) or i >= len(expected) or res[i] != expected[i]
-            ),
-        )
+        f"\n[bold cyan]Summary:[/] [green]✓ {passed} passed[/], [red]✗ {failed} failed[/]\n"
     )
+
+    if err:
+        console.print("[bold red]Script Error Output:[/]")
+        console.print(f"[dim]{err}[/]\n")
+
+
+def main():
+    if len(sys.argv) != 2:
+        print("Usage: python tester.py <script.py>")
+        sys.exit(1)
+
+    script_path = sys.argv[1]
+
+    input_lines = read_lines("Enter input")
+    expected_output = read_lines("Enter expected output")
+
+    actual_output, stderr = run_and_capture(script_path, input_lines)
+
+    compare_outputs(actual_output, expected_output, err=stderr)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python runner.py <script.py>")
-        sys.exit(1)
+    main()
 
-    script_file = sys.argv[1]
-
-    Console().print("\n[bold cyan]> Enter input:[/]\n")
-
-    result = run_and_capture(script_file)
-
-    Console().print("\n[bold magenta]> Enter expected output:[/]\n")
-
-    expected = read_input_lines()
-
-    compare_outputs(result, expected)
